@@ -1,0 +1,10 @@
+# IDEs
+.vscode/
+.idea/
+*.sublime-workspace
+*.sublime-project
+
+# Python
+.env
+__pycache__/
+*.pyc
