@@ -150,16 +150,23 @@ def migrate_repo(repo):
         # Sincronizar asignees si el issue ya existe
         existing_issue = find_existing_issue(ORG_DEST, repo, issue["title"])
         if existing_issue:
-            # Obtener logins de asignees en origen y destino
             origin_assignees = set([a["login"] for a in issue.get("assignees", [])])
             dest_assignees = set([a["login"] for a in existing_issue.get("assignees", [])])
-            # Si son diferentes, actualizar
             if origin_assignees != dest_assignees:
                 url = f"https://api.github.com/repos/{ORG_DEST}/{repo}/issues/{existing_issue['number']}"
                 data = {"assignees": list(origin_assignees)}
                 resp = requests.patch(url, headers=HEADERS, json=data)
                 if resp.status_code == 200:
                     log(f"🔄 Asignees sincronizados en issue '{issue['title']}' ({existing_issue['number']})")
+                elif resp.status_code == 422 and "could not be found" in resp.text.lower():
+                    # Algún asignee no existe en el repo destino, intentar con lista vacía
+                    log(f"⚠️ Algún asignee no existe en el repo destino para issue '{issue['title']}', dejando vacío y reintentando...")
+                    data_empty = {"assignees": []}
+                    resp2 = requests.patch(url, headers=HEADERS, json=data_empty)
+                    if resp2.status_code == 200:
+                        log(f"🔄 Asignees vacíos sincronizados en issue '{issue['title']}' ({existing_issue['number']})")
+                    else:
+                        log(f"❌ Error sincronizando asignees vacíos en issue '{issue['title']}': {resp2.status_code} - {resp2.text}")
                 else:
                     log(f"❌ Error sincronizando asignees en issue '{issue['title']}': {resp.status_code} - {resp.text}")
         create_issue(ORG_DEST, repo, issue)
