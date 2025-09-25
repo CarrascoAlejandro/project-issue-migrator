@@ -117,7 +117,7 @@ def close_issue(org, repo, issue_number):
     resp = requests.patch(url, headers=HEADERS, json=data)
     
     if resp.status_code == 200:
-        log(f"✅ Issue #{issue_number} cerrado en {org}/{repo}")
+        log(f"🟪 Issue #{issue_number} cerrado en {org}/{repo}")
         return True
     else:
         log(f"❌ Error cerrando issue #{issue_number}: {resp.status_code} - {resp.text}")
@@ -138,6 +138,27 @@ def reopen_issue(org, repo, issue_number):
         log(f"❌ Error reabriendo issue #{issue_number}: {resp.status_code} - {resp.text}")
         return False
 
+def sync_assignees(issue, existing_issue, repo):
+    """Sincroniza los asignees entre el issue original y el existente en el destino"""
+    origin_assignees = {a["login"] for a in issue.get("assignees", [])}
+    dest_assignees = {a["login"] for a in existing_issue.get("assignees", [])}
+    if origin_assignees != dest_assignees:
+        url = f"https://api.github.com/repos/{ORG_DEST}/{repo}/issues/{existing_issue['number']}"
+        data = {"assignees": list(origin_assignees)}
+        resp = requests.patch(url, headers=HEADERS, json=data)
+        if resp.status_code == 200:
+            log(f"🔄 Asignees sincronizados en issue '{issue['title']}' ({existing_issue['number']})")
+        elif resp.status_code == 422 and "could not be found" in resp.text.lower():
+            log(f"⚠️ Algún asignee no existe en el repo destino para issue '{issue['title']}', dejando vacío y reintentando...")
+            data_empty = {"assignees": []}
+            resp2 = requests.patch(url, headers=HEADERS, json=data_empty)
+            if resp2.status_code == 200:
+                log(f"🔄 Asignees vacíos sincronizados en issue '{issue['title']}' ({existing_issue['number']})")
+            else:
+                log(f"❌ Error sincronizando asignees vacíos en issue '{issue['title']}': {resp2.status_code} - {resp2.text}")
+        else:
+            log(f"❌ Error sincronizando asignees en issue '{issue['title']}': {resp.status_code} - {resp.text}")
+
 def migrate_repo(repo):
     """Migra issues de un repo de ORG_SOURCE a ORG_DEST"""
     log(f"🚀 Migrando issues de {ORG_SOURCE}/{repo} → {ORG_DEST}/{repo}")
@@ -150,26 +171,9 @@ def migrate_repo(repo):
         # Sincronizar asignees si el issue ya existe
         existing_issue = find_existing_issue(ORG_DEST, repo, issue["title"])
         if existing_issue:
-            origin_assignees = set([a["login"] for a in issue.get("assignees", [])])
-            dest_assignees = set([a["login"] for a in existing_issue.get("assignees", [])])
-            if origin_assignees != dest_assignees:
-                url = f"https://api.github.com/repos/{ORG_DEST}/{repo}/issues/{existing_issue['number']}"
-                data = {"assignees": list(origin_assignees)}
-                resp = requests.patch(url, headers=HEADERS, json=data)
-                if resp.status_code == 200:
-                    log(f"🔄 Asignees sincronizados en issue '{issue['title']}' ({existing_issue['number']})")
-                elif resp.status_code == 422 and "could not be found" in resp.text.lower():
-                    # Algún asignee no existe en el repo destino, intentar con lista vacía
-                    log(f"⚠️ Algún asignee no existe en el repo destino para issue '{issue['title']}', dejando vacío y reintentando...")
-                    data_empty = {"assignees": []}
-                    resp2 = requests.patch(url, headers=HEADERS, json=data_empty)
-                    if resp2.status_code == 200:
-                        log(f"🔄 Asignees vacíos sincronizados en issue '{issue['title']}' ({existing_issue['number']})")
-                    else:
-                        log(f"❌ Error sincronizando asignees vacíos en issue '{issue['title']}': {resp2.status_code} - {resp2.text}")
-                else:
-                    log(f"❌ Error sincronizando asignees en issue '{issue['title']}': {resp.status_code} - {resp.text}")
+            sync_assignees(issue, existing_issue, repo)
         create_issue(ORG_DEST, repo, issue)
+    log(f"🏁 Migración de {ORG_SOURCE}/{repo} completada.")
 
 # ==========================================================
 # Script principal

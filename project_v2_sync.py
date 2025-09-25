@@ -277,12 +277,54 @@ def sync_item_fields(src_values: Dict[str, Any], dest_field_map: Dict[str, Dict[
         gql_update_field_value(project_id_dest, item_id_dest, dest_field, src_values[key])
 
 
+def process_src_item(src_item, dst_project, dst_field_map, processed, skipped_repo, skipped_no_target_issue):
+    content = src_item.get("content") or {}
+    if content.get("__typename") != "Issue":
+        return processed, skipped_repo + 1, skipped_no_target_issue
+    repo_name = content.get("repository", {}).get("name")
+    if repo_name not in REPOS:
+        return processed, skipped_repo + 1, skipped_no_target_issue
+
+    issue_title = content.get("title") or ""
+    if not issue_title:
+        skipped_no_target_issue += 1
+        log("⚠️ Source issue missing title, skipping")
+        return processed, skipped_repo, skipped_no_target_issue
+
+    target_issue = rest_find_issue_by_title(ORG_DEST or "", repo_name, issue_title)
+    if not target_issue:
+        skipped_no_target_issue += 1
+        log(f"⚠️ Target issue not found for '{issue_title}' in {ORG_DEST}/{repo_name}")
+        return processed, skipped_repo, skipped_no_target_issue
+
+    issue_node = get_issue_node(target_issue, repo_name)
+    if not issue_node:
+        log(f"❌ Could not resolve node id for {ORG_DEST}/{repo_name}#{target_issue['number']}")
+        return processed, skipped_repo, skipped_no_target_issue
+
+    dest_item_id = gql_add_item_to_project(dst_project["id"], issue_node["id"]) or gql_find_item_for_issue(dst_project["id"], issue_node["id"])
+    if not dest_item_id:
+        log(f"❌ Could not add/find project item for {ORG_DEST}/{repo_name}#{target_issue['number']}")
+        return processed, skipped_repo, skipped_no_target_issue
+
+    src_values = extract_values_map((src_item.get("fieldValues") or {}).get("nodes", []))
+    sync_item_fields(src_values, dst_field_map, dst_project["id"], dest_item_id)
+    return processed + 1, skipped_repo, skipped_no_target_issue
+
+def get_issue_node(target_issue, repo_name):
+    q_issue = """
+    query($owner:String!, $name:String!, $number:Int!) {
+      repository(owner:$owner, name:$name) { issue(number:$number) { id number title } }
+    }
+    """
+    data_issue = gql(q_issue, {"owner": ORG_DEST, "name": repo_name, "number": target_issue["number"]})
+    return (data_issue.get("repository") or {}).get("issue")
+
 def main():
     print("=" * 60)
     print("🔁 Project V2 items and fields sync")
     print("=" * 60)
 
-    # Locate source/destination projects by name
     src_project = get_org_project_by_name(ORG_SOURCE or "", PROJECT_NAME or "")
     if not src_project:
         log(f"❌ Source project '{PROJECT_NAME}' not found in org {ORG_SOURCE}")
@@ -295,14 +337,12 @@ def main():
     log(f"Source project: {src_project['title']} (#{src_project['number']})")
     log(f"Dest project: {dst_project['title']} (#{dst_project['number']})")
 
-    # Load fields
-    src_fields = get_project_fields(src_project["id"])  # includes options for single-select
-    dst_fields = get_project_fields(dst_project["id"])  # includes options for single-select
+    src_fields = get_project_fields(src_project["id"])
+    dst_fields = get_project_fields(dst_project["id"])
     src_field_map = get_field_map(src_fields)
     dst_field_map = get_field_map(dst_fields)
 
-    # List source items with field values
-    src_items = list_project_items_with_values(src_project["id"])  # includes content and fieldValues
+    src_items = list_project_items_with_values(src_project["id"])
     log(f"Found {len(src_items)} source project items")
 
     processed = 0
@@ -310,54 +350,9 @@ def main():
     skipped_no_target_issue = 0
 
     for src_item in src_items:
-        content = src_item.get("content") or {}
-        if content.get("__typename") != "Issue":
-            continue
-        repo_name = content.get("repository", {}).get("name")
-        if repo_name not in REPOS:
-            skipped_repo += 1
-            continue
-
-        issue_title = content.get("title") or ""
-        if not issue_title:
-            skipped_no_target_issue += 1
-            log("⚠️ Source issue missing title, skipping")
-            continue
-        # Find corresponding issue in destination org/repo by title
-        target_issue = rest_find_issue_by_title(ORG_DEST or "", repo_name, issue_title)
-        if not target_issue:
-            skipped_no_target_issue += 1
-            log(f"⚠️ Target issue not found for '{issue_title}' in {ORG_DEST}/{repo_name}")
-            continue
-
-        # Ensure item exists in destination project
-        # Need GraphQL node id for the target issue
-        # Use a lightweight GraphQL lookup by URL id
-        issue_api_url = target_issue.get("url")
-        # The REST issue returns "url" like https://api.github.com/repos/{org}/{repo}/issues/{number}
-        # We need node id -> perform a short GQL query by repository + number
-        q_issue = """
-        query($owner:String!, $name:String!, $number:Int!) {
-          repository(owner:$owner, name:$name) { issue(number:$number) { id number title } }
-        }
-        """
-        data_issue = gql(q_issue, {"owner": ORG_DEST, "name": repo_name, "number": target_issue["number"]})
-        issue_node = (data_issue.get("repository") or {}).get("issue")
-        if not issue_node:
-            log(f"❌ Could not resolve node id for {ORG_DEST}/{repo_name}#{target_issue['number']}")
-            continue
-
-        dest_item_id = gql_add_item_to_project(dst_project["id"], issue_node["id"]) or gql_find_item_for_issue(dst_project["id"], issue_node["id"])
-        if not dest_item_id:
-            log(f"❌ Could not add/find project item for {ORG_DEST}/{repo_name}#{target_issue['number']}")
-            continue
-
-        # Extract source values
-        src_values = extract_values_map((src_item.get("fieldValues") or {}).get("nodes", []))
-
-        # Sync only the requested fields. Setting Status replicates board column placement.
-        sync_item_fields(src_values, dst_field_map, dst_project["id"], dest_item_id)
-        processed += 1
+        processed, skipped_repo, skipped_no_target_issue = process_src_item(
+            src_item, dst_project, dst_field_map, processed, skipped_repo, skipped_no_target_issue
+        )
 
     log("-" * 60)
     log(f"Processed: {processed}")

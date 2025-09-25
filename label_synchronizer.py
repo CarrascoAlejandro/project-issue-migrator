@@ -106,27 +106,50 @@ def filter_existing(labels, existing):
 # Project column detection (classic projects)
 # ----------------------------------------------------------
 
+def get_projects(org, repo):
+    url = f"https://api.github.com/repos/{org}/{repo}/projects"
+    resp = requests.get(url, headers=HEADERS)
+    if resp.status_code != 200:
+        return []
+    return resp.json()
+
+def get_columns(project_id):
+    url = f"https://api.github.com/projects/{project_id}/columns"
+    resp = requests.get(url, headers=HEADERS)
+    if resp.status_code != 200:
+        return []
+    return resp.json()
+
+def get_cards(column_id):
+    url = f"https://api.github.com/projects/columns/{column_id}/cards"
+    resp = requests.get(url, headers=HEADERS)
+    if resp.status_code != 200:
+        return []
+    return resp.json()
+
+def find_issue_column_in_projects(projects, issue_number):
+    for project in projects:
+        columns = get_columns(project['id'])
+        for col in columns:
+            if find_issue_in_column(col, issue_number):
+                return col.get("name")
+    return None
+
+def find_issue_in_column(col, issue_number):
+    cards = get_cards(col['id'])
+    for card in cards:
+        content_url = card.get("content_url")
+        if content_url and content_url.endswith(f"/issues/{issue_number}"):
+            return True
+    return False
+
 def get_issue_project_column(org: str, repo: str, issue_number: int):
     """Devuelve el nombre de la columna del project classic donde está el issue (primera coincidencia)."""
     try:
-        projects_url = f"https://api.github.com/repos/{org}/{repo}/projects"
-        resp_projects = requests.get(projects_url, headers=HEADERS)
-        if resp_projects.status_code != 200:
-            return None
-        for project in resp_projects.json():
-            cols_url = f"https://api.github.com/projects/{project['id']}/columns"
-            resp_cols = requests.get(cols_url, headers=HEADERS)
-            if resp_cols.status_code != 200:
-                continue
-            for col in resp_cols.json():
-                cards_url = f"https://api.github.com/projects/columns/{col['id']}/cards"
-                resp_cards = requests.get(cards_url, headers=HEADERS)
-                if resp_cards.status_code != 200:
-                    continue
-                for card in resp_cards.json():
-                    content_url = card.get("content_url")
-                    if content_url and content_url.endswith(f"/issues/{issue_number}"):
-                        return col.get("name")
+        projects = get_projects(org, repo)
+        column_name = find_issue_column_in_projects(projects, issue_number)
+        if column_name:
+            return column_name
     except Exception as e:
         log(f"⚠️ Error detectando columna de proyecto para issue #{issue_number}: {e}")
     return None
