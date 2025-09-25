@@ -10,7 +10,7 @@ load_dotenv()
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 ORG_SOURCE = os.getenv("ORG_SOURCE")
 ORG_DEST = os.getenv("ORG_DEST")
-REPOS = os.getenv("REPOS").split(",")
+REPOS = os.getenv("REPOS").split(",") # type: ignore
 
 HEADERS = {"Authorization": f"token {GITHUB_TOKEN}"}
 

@@ -19,11 +19,22 @@ Suposiciones:
 - Para proyectos V2 (beta) no se hace query avanzada GraphQL de items -> columns (requeriría item iteration); se puede ampliar luego.
 """
 
-load_dotenv()
 
-GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
-ORG_SOURCE = os.getenv("ORG_SOURCE")
-ORG_DEST = os.getenv("ORG_DEST")
+def check_env_vars():
+    required_vars = ["GITHUB_TOKEN", "ORG_SOURCE", "ORG_DEST", "REPOS"]
+    missing = [var for var in required_vars if not os.getenv(var)]
+    if missing:
+        print(f"❌ Faltan variables de entorno requeridas: {', '.join(missing)}")
+        exit(1)
+
+load_dotenv()
+check_env_vars()
+
+
+# After check_env_vars(), these are guaranteed to be str
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN") or ""
+ORG_SOURCE = os.getenv("ORG_SOURCE") or ""
+ORG_DEST = os.getenv("ORG_DEST") or ""
 REPOS = [r.strip() for r in os.getenv("REPOS", "").split(",") if r.strip()]
 
 HEADERS = {"Authorization": f"token {GITHUB_TOKEN}"}
