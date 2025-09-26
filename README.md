@@ -208,6 +208,8 @@ graph TD
 - The orchestrator continues execution even if individual scripts fail
 - All scripts respect GitHub API rate limits and include error handling
 - Project V2 sync requires the `PROJECT` environment variable to be set
+- It is recommended to setup a python virtual environment to manage dependencies
+- Ensure you have network connectivity to GitHub's API endpoints
 
 ## 🤝 Contributing
 
