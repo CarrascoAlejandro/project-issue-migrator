@@ -10,7 +10,7 @@ load_dotenv()
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 ORG_SOURCE = os.getenv("ORG_SOURCE")
 ORG_DEST = os.getenv("ORG_DEST")
-REPOS = os.getenv("REPOS").split(",")
+REPOS = os.getenv("REPOS").split(",") # type: ignore
 
 HEADERS = {"Authorization": f"Bearer {GITHUB_TOKEN}"}
 GRAPHQL_URL = "https://api.github.com/graphql"
@@ -263,7 +263,7 @@ def get_project_field_options(org):
         for project in user_projects:
             project_options = get_project_fields_and_options(project["id"])
             all_options.update(project_options)
-    except:
+    except Exception:
         # Silenciar errores si no es un usuario
         pass
     
